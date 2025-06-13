@@ -3,6 +3,7 @@
 #include <cstdint>
 #include <array>
 #include <string>
+#include <string_view>
 #include <stdexcept>
 #include <Common/Exception.h>
 
@@ -17,8 +18,8 @@ namespace ErrorCodes
 namespace Bit11String
 {
     // Character set: a-z, 0-9, A-Z (62 characters)
-    static constexpr char charset[] = "abcdefghijklmnopqrstuvwxyz0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ";
-    static constexpr size_t charset_size = 62;
+    static constexpr std::string_view charset = "abcdefghijklmnopqrstuvwxyz0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ";
+    static constexpr size_t charset_size = charset.size();
     static constexpr size_t bits_per_block = 11;
     static constexpr size_t chars_per_block = 2;
     static constexpr uint64_t max_11bit_value = 2047; // 2^11 - 1
@@ -30,7 +31,7 @@ namespace Bit11String
         for (size_t i = 0; i < 256; ++i)
             table[i] = 255; // Invalid character marked as 255
 
-        for (size_t i = 0; i < charset_size; ++i)
+        for (size_t i = 0; i < charset.size(); ++i)
             table[static_cast<uint8_t>(charset[i])] = i;
 
         return table;
