@@ -11,6 +11,7 @@
 #include <Columns/ColumnsNumber.h>
 #include <Columns/ColumnArray.h>
 #include <Columns/ColumnNullable.h>
+#include <Columns/ColumnConst.h>
 #include <IO/WriteHelpers.h>
 #include <Common/typeid_cast.h>
 
@@ -63,7 +64,20 @@ public:
 
     ColumnPtr executeImpl(const ColumnsWithTypeAndName & arguments, const DataTypePtr &, size_t input_rows_count) const override
     {
-        const auto * string_column = checkAndGetColumn<ColumnString>(arguments[0].column.get());
+        const ColumnString * string_column = nullptr;
+        bool is_const = false;
+        
+        // Handle both regular and const string columns
+        if (const auto * const_column = checkAndGetColumnConst<ColumnString>(arguments[0].column.get()))
+        {
+            string_column = assert_cast<const ColumnString *>(&const_column->getDataColumn());
+            is_const = true;
+        }
+        else
+        {
+            string_column = checkAndGetColumn<ColumnString>(arguments[0].column.get());
+        }
+        
         if (!string_column)
             throw Exception(ErrorCodes::ILLEGAL_TYPE_OF_ARGUMENT, 
                 "First argument of function {} must be String column", getName());
@@ -110,7 +124,7 @@ public:
         // 各行を処理
         for (size_t row = 0; row < input_rows_count; ++row)
         {
-            const auto & encoded_string = string_column->getDataAt(row);
+            const auto & encoded_string = string_column->getDataAt(is_const ? 0 : row);
             
             // 文字列長が2の倍数でない場合はエラー
             if (encoded_string.size % 2 != 0)

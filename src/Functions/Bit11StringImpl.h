@@ -5,6 +5,7 @@
 #include <string>
 #include <string_view>
 #include <stdexcept>
+#include <algorithm>
 #include <Common/Exception.h>
 
 namespace DB
@@ -73,9 +74,10 @@ namespace Bit11String
     class BitBuffer
     {
     private:
-        uint64_t buffer = 0;
+        // 256 bits stored as bytes for easier manipulation
+        std::array<uint8_t, 32> buffer{};  // 256 bits = 32 bytes
         size_t bit_count = 0;
-        static constexpr size_t max_bits = 64;
+        static constexpr size_t max_bits = 256;
 
     public:
         void addBits(uint64_t value, size_t bits)
@@ -85,7 +87,7 @@ namespace Bit11String
 
             if (bit_count + bits > max_bits)
                 throw Exception(ErrorCodes::BAD_ARGUMENTS, 
-                    "Total bit count {} exceeds buffer capacity", bit_count + bits);
+                    "Total bit count {} exceeds buffer capacity of {} bits", bit_count + bits, max_bits);
 
             // 値がビット長で表現可能か確認
             uint64_t max_value = (bits == 64) ? UINT64_MAX : ((1ULL << bits) - 1);
@@ -93,7 +95,19 @@ namespace Bit11String
                 throw Exception(ErrorCodes::BAD_ARGUMENTS, 
                     "Value {} cannot be represented in {} bits", value, bits);
 
-            buffer = (buffer << bits) | value;
+            // Add bits from MSB to LSB
+            for (size_t i = 0; i < bits; ++i)
+            {
+                size_t bit_pos = bit_count + i;
+                size_t byte_idx = bit_pos / 8;
+                size_t bit_in_byte = 7 - (bit_pos % 8);
+                
+                if ((value >> (bits - 1 - i)) & 1)
+                    buffer[byte_idx] |= (1U << bit_in_byte);
+                else
+                    buffer[byte_idx] &= ~(1U << bit_in_byte);
+            }
+            
             bit_count += bits;
         }
 
@@ -108,10 +122,7 @@ namespace Bit11String
                 throw Exception(ErrorCodes::BAD_ARGUMENTS, 
                     "Not enough bits in buffer: {} < {}", bit_count, bits_per_block);
 
-            bit_count -= bits_per_block;
-            uint64_t result = (buffer >> bit_count) & max_11bit_value;
-            buffer &= (1ULL << bit_count) - 1; // Clear used bits
-            return result;
+            return extractBits(bits_per_block);
         }
 
         size_t getBitCount() const { return bit_count; }
@@ -128,12 +139,39 @@ namespace Bit11String
             if (bits > 64)
                 throw Exception(ErrorCodes::BAD_ARGUMENTS, "Bit length {} exceeds 64", bits);
 
-            size_t shift = bit_count - bits;
-            uint64_t mask = (bits == 64) ? UINT64_MAX : ((1ULL << bits) - 1);
-            uint64_t result = (buffer >> shift) & mask;
+            uint64_t result = 0;
             
-            buffer &= (1ULL << shift) - 1;
-            bit_count = shift;
+            // Extract bits from buffer
+            for (size_t i = 0; i < bits; ++i)
+            {
+                size_t byte_idx = i / 8;
+                size_t bit_in_byte = 7 - (i % 8);
+                
+                if (buffer[byte_idx] & (1U << bit_in_byte))
+                    result |= (1ULL << (bits - 1 - i));
+            }
+            
+            // Shift remaining bits to the left
+            size_t remaining_bits = bit_count - bits;
+            for (size_t i = 0; i < remaining_bits; ++i)
+            {
+                size_t src_byte = (i + bits) / 8;
+                size_t src_bit = 7 - ((i + bits) % 8);
+                size_t dst_byte = i / 8;
+                size_t dst_bit = 7 - (i % 8);
+                
+                if (buffer[src_byte] & (1U << src_bit))
+                    buffer[dst_byte] |= (1U << dst_bit);
+                else
+                    buffer[dst_byte] &= ~(1U << dst_bit);
+            }
+            
+            // Clear the tail
+            size_t clear_start = (remaining_bits + 7) / 8;
+            for (size_t i = clear_start; i < buffer.size(); ++i)
+                buffer[i] = 0;
+            
+            bit_count = remaining_bits;
             
             return result;
         }
