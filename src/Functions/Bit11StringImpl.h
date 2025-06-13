@@ -6,6 +6,7 @@
 #include <string_view>
 #include <stdexcept>
 #include <algorithm>
+#include <boost/multiprecision/cpp_int.hpp>
 #include <Common/Exception.h>
 
 namespace DB
@@ -70,12 +71,23 @@ namespace Bit11String
         return result;
     }
 
-    // Helper class for bit buffer operations
+    // Helper class for bit buffer operations using Boost.Multiprecision
+    // We use Boost.Multiprecision instead of manual bit manipulation for:
+    // 1. Better maintainability - well-tested library code
+    // 2. Cleaner API - natural bit shift and logical operations
+    // 3. Performance - optimized for various architectures
+    // 4. Safety - automatic bounds checking and memory management
     class BitBuffer
     {
     private:
-        // 256 bits stored as bytes for easier manipulation
-        std::array<uint8_t, 32> buffer{};  // 256 bits = 32 bytes
+        // Use Boost's fixed-size 256-bit unsigned integer
+        // This provides exactly 256 bits of storage with efficient operations
+        using uint256_t = boost::multiprecision::number<
+            boost::multiprecision::cpp_int_backend<256, 256, 
+                boost::multiprecision::unsigned_magnitude, 
+                boost::multiprecision::unchecked, void>>;
+        
+        uint256_t buffer{0};
         size_t bit_count = 0;
         static constexpr size_t max_bits = 256;
 
@@ -89,25 +101,15 @@ namespace Bit11String
                 throw Exception(ErrorCodes::BAD_ARGUMENTS, 
                     "Total bit count {} exceeds buffer capacity of {} bits", bit_count + bits, max_bits);
 
-            // 値がビット長で表現可能か確認
+            // Check if value can be represented in the specified bit length
             uint64_t max_value = (bits == 64) ? UINT64_MAX : ((1ULL << bits) - 1);
             if (value > max_value)
                 throw Exception(ErrorCodes::BAD_ARGUMENTS, 
                     "Value {} cannot be represented in {} bits", value, bits);
 
-            // Add bits from MSB to LSB
-            for (size_t i = 0; i < bits; ++i)
-            {
-                size_t bit_pos = bit_count + i;
-                size_t byte_idx = bit_pos / 8;
-                size_t bit_in_byte = 7 - (bit_pos % 8);
-                
-                if ((value >> (bits - 1 - i)) & 1)
-                    buffer[byte_idx] |= (1U << bit_in_byte);
-                else
-                    buffer[byte_idx] &= ~(1U << bit_in_byte);
-            }
-            
+            // Shift existing bits to the left and add new value
+            buffer <<= bits;
+            buffer |= uint256_t(value);
             bit_count += bits;
         }
 
@@ -139,39 +141,23 @@ namespace Bit11String
             if (bits > 64)
                 throw Exception(ErrorCodes::BAD_ARGUMENTS, "Bit length {} exceeds 64", bits);
 
-            uint64_t result = 0;
+            // Extract the most significant 'bits' bits
+            size_t shift_amount = bit_count - bits;
+            uint256_t mask = (uint256_t(1) << bits) - 1;
+            uint64_t result = static_cast<uint64_t>((buffer >> shift_amount) & mask);
             
-            // Extract bits from buffer
-            for (size_t i = 0; i < bits; ++i)
+            // Remove extracted bits from buffer
+            if (shift_amount > 0)
             {
-                size_t byte_idx = i / 8;
-                size_t bit_in_byte = 7 - (i % 8);
-                
-                if (buffer[byte_idx] & (1U << bit_in_byte))
-                    result |= (1ULL << (bits - 1 - i));
+                uint256_t remaining_mask = (uint256_t(1) << shift_amount) - 1;
+                buffer &= remaining_mask;
+            }
+            else
+            {
+                buffer = 0;
             }
             
-            // Shift remaining bits to the left
-            size_t remaining_bits = bit_count - bits;
-            for (size_t i = 0; i < remaining_bits; ++i)
-            {
-                size_t src_byte = (i + bits) / 8;
-                size_t src_bit = 7 - ((i + bits) % 8);
-                size_t dst_byte = i / 8;
-                size_t dst_bit = 7 - (i % 8);
-                
-                if (buffer[src_byte] & (1U << src_bit))
-                    buffer[dst_byte] |= (1U << dst_bit);
-                else
-                    buffer[dst_byte] &= ~(1U << dst_bit);
-            }
-            
-            // Clear the tail
-            size_t clear_start = (remaining_bits + 7) / 8;
-            for (size_t i = clear_start; i < buffer.size(); ++i)
-                buffer[i] = 0;
-            
-            bit_count = remaining_bits;
+            bit_count -= bits;
             
             return result;
         }
