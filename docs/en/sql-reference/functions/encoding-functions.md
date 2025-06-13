@@ -968,6 +968,138 @@ Result:
 1    2
 ```
 
+## encodeBit11String {#encodebit11string}
+
+Encodes integers into a compact string representation using 11-bit encoding. This encoding scheme maps 11-bit values (0-2047) to pairs of alphanumeric characters without using special symbols.
+
+**Syntax**
+
+```sql
+encodeBit11String(bit_length_1, value_1, bit_length_2, value_2, ...)
+```
+
+**Arguments**
+
+- `bit_length_N` — Bit length for the N-th value. Must be between 1 and 64. [UInt8/UInt16/UInt32/UInt64](../data-types/int-uint.md).
+- `value_N` — The N-th value to encode. Must fit within the specified bit length. [UInt64](../data-types/int-uint.md).
+
+Arguments must come in pairs (bit_length, value). The total number of bits must be a multiple of 11.
+
+**Returned value**
+
+- Encoded string using only alphanumeric characters [a-z0-9A-Z]. [String](../data-types/string.md).
+
+**Example**
+
+Query:
+
+```sql
+SELECT encodeBit11String(11, 0);
+```
+
+Result:
+
+```text
+┌─encodeBit11String(11, 0)─┐
+│ aa                       │
+└──────────────────────────┘
+```
+
+Query:
+
+```sql
+SELECT encodeBit11String(5, 7, 6, 3);
+```
+
+Result:
+
+```text
+┌─encodeBit11String(5, 7, 6, 3)─┐
+│ hr                            │
+└───────────────────────────────┘
+```
+
+Query:
+
+```sql
+SELECT encodeBit11String(11, 2047);
+```
+
+Result:
+
+```text
+┌─encodeBit11String(11, 2047)─┐
+│ 7b                          │
+└─────────────────────────────┘
+```
+
+## decodeBit11String {#decodebit11string}
+
+Decodes a string encoded with `encodeBit11String` back to its original integer values.
+
+**Syntax**
+
+```sql
+decodeBit11String(encoded_string, bit_length_1, bit_length_2, ...)
+```
+
+**Arguments**
+
+- `encoded_string` — String encoded with `encodeBit11String`. [String](../data-types/string.md).
+- `bit_length_N` — Bit length for the N-th value to extract. [UInt8/UInt16/UInt32/UInt64](../data-types/int-uint.md).
+
+The sum of all bit lengths must match the total bits encoded in the string (number of characters / 2 * 11).
+
+**Returned value**
+
+- Array of decoded unsigned integers. [Array(UInt64)](../data-types/array.md).
+
+**Example**
+
+Query:
+
+```sql
+SELECT decodeBit11String('aa', 11);
+```
+
+Result:
+
+```text
+┌─decodeBit11String('aa', 11)─┐
+│ [0]                         │
+└─────────────────────────────┘
+```
+
+Query:
+
+```sql
+SELECT decodeBit11String('hr', 5, 6);
+```
+
+Result:
+
+```text
+┌─decodeBit11String('hr', 5, 6)─┐
+│ [7,3]                         │
+└───────────────────────────────┘
+```
+
+Round-trip example:
+
+Query:
+
+```sql
+SELECT decodeBit11String(encodeBit11String(5, 7, 6, 3), 5, 6);
+```
+
+Result:
+
+```text
+┌─decodeBit11String(encodeBit11String(5, 7, 6, 3), 5, 6)─┐
+│ [7,3]                                                   │
+└─────────────────────────────────────────────────────────┘
+```
+
 ## bech32Encode {#bech32encode}
 
 Encodes a binary data string, along with a human-readable part (HRP), using the [Bech32 or Bech32m](https://en.bitcoin.it/wiki/Bech32) algorithms.
